@@ -273,6 +273,7 @@ proc asyncSingleProc(prc: NimNode): NimNode {.compileTime.} =
   var outerProcBody = newNimNode(nnkStmtList, prc.body)
 
   # -> var retFuture = newFuture[T]()
+  let newFuture = bindSym "newFuture"
   var retFutureSym = genSym(nskVar, "retFuture")
   var subRetType =
     if returnType.kind == nnkEmpty: newIdentNode("void")
@@ -281,7 +282,7 @@ proc asyncSingleProc(prc: NimNode): NimNode {.compileTime.} =
     newVarStmt(retFutureSym,
       newCall(
         newNimNode(nnkBracketExpr, prc.body).add(
-          newIdentNode("newFuture"),
+          newFuture,
           subRetType),
       newLit(prcName)))) # Get type from return type of this proc
 
