@@ -8,6 +8,8 @@
 import unittest
 import ../chronos
 
+const hasThreadSupport* = compileOption("threads")
+
 suite "Asynchronous sync primitives test suite":
   var testLockResult = ""
   var testEventResult = ""
@@ -242,6 +244,80 @@ suite "Asynchronous sync primitives test suite":
     q.putNoWait(5)
     result = (5 in q and not(6 in q))
 
+  proc ateTest1(): bool =
+    var e = newAsyncThreadEvent()
+    let r1 = (waitFor(e.wait(100.milliseconds)) == WaitTimeout)
+    let r2 = (e.waitSync(100.milliseconds) == WaitTimeout)
+    e.close()
+    result = r1 and r2
+
+  proc ateTest2(): bool =
+    var e = newAsyncThreadEvent()
+    e.fire()
+    let r1 = waitFor(e.wait(100.milliseconds)) == WaitSuccess
+    let r2 = (e.waitSync(100.milliseconds)) == WaitTimeout
+    e.fire()
+    let r3 = (e.waitSync(100.milliseconds)) == WaitSuccess
+    let r4 = waitFor(e.wait(100.milliseconds)) == WaitTimeout
+    e.close()
+    result = r1 and r2 and r3 and r4
+
+  when hasThreadSupport:
+    type
+      ThreadArg = object
+        event1: AsyncThreadEvent
+        event2: AsyncThreadEvent
+        event3: AsyncThreadEvent
+        event4: AsyncThreadEvent
+
+    proc ateSyncThread(arg: ThreadArg) {.thread.} =
+      var res = true
+      for i in 1..100:
+        arg.event1.fire()
+        let r = waitSync(arg.event2)
+        if r != WaitSuccess:
+          res = false
+          break
+      if res:
+        arg.event4.fire()
+
+    proc ateAsyncLoop(arg: ThreadArg): Future[bool] {.async.} =
+      var res = true
+      for i in 1..100:
+        let r = await wait(arg.event1)
+        if r == WaitSuccess:
+          arg.event2.fire()
+        else:
+          res = false
+          break
+      return res
+
+    proc ateAsyncThread(arg: ThreadArg) {.thread.} =
+      let res = waitFor ateAsyncLoop(arg)
+      if res:
+        arg.event3.fire()
+
+    proc ateTest3(): bool =
+      var arg = ThreadArg(
+        event1: newAsyncThreadEvent(),
+        event2: newAsyncThreadEvent(),
+        event3: newAsyncThreadEvent(),
+        event4: newAsyncThreadEvent()
+      )
+      var thr1: Thread[ThreadArg]
+      var thr2: Thread[ThreadArg]
+      createThread(thr1, ateSyncThread, arg)
+      createThread(thr2, ateAsyncThread, arg)
+      let r1 = waitSync(arg.event3, 10.seconds)
+      let r2 = waitSync(arg.event4, 10.seconds)
+      result = (r1 == WaitSuccess) and (r2 == WaitSuccess)
+      close(arg.event1)
+      close(arg.event2)
+      close(arg.event3)
+      close(arg.event4)
+      if result:
+        joinThreads(thr1, thr2)
+
   test "AsyncLock() behavior test":
     check:
       test1() == "0123456789"
@@ -257,7 +333,6 @@ suite "Asynchronous sync primitives test suite":
       waitFor(testCancelLock(50.milliseconds,
                              20.milliseconds,
                              10.milliseconds, 3)) == @[10, 20, 11, 21]
-
   test "AsyncEvent() behavior test":
     check test2() == "0123456789"
   test "AsyncQueue() behavior test":
@@ -274,3 +349,12 @@ suite "Asynchronous sync primitives test suite":
     check test8() == true
   test "AsyncQueue() contains test":
     check test9() == true
+  test "AsyncThreadEvent single-threaded test #1":
+    check ateTest1() == true
+  test "AsyncThreadEvent single-threaded test #2":
+    check ateTest2() == true
+  test "AsyncThreadEvent multi-threaded test #1":
+    when hasThreadSupport:
+      check ateTest3() == true
+    else:
+      skip()

@@ -7,8 +7,8 @@
 #  Apache License, version 2.0, (LICENSE-APACHEv2)
 #              MIT license (LICENSE-MIT)
 import os, strutils, nativesockets, net
-import ../asyncloop
-export net
+import ../asyncloop, ../osapi
+export net, osapi
 
 when defined(windows):
   import winlean
@@ -484,35 +484,3 @@ proc isLiteral*(s: string): bool {.inline.} =
 
 proc isLiteral*[T](s: seq[T]): bool {.inline.} =
   (cast[ptr SeqHeader](s).reserved and (1 shl (sizeof(int) * 8 - 2))) != 0
-
-when defined(windows):
-  import winlean
-
-  const
-    ERROR_OPERATION_ABORTED* = 995
-    ERROR_PIPE_CONNECTED* = 535
-    ERROR_PIPE_BUSY* = 231
-    ERROR_SUCCESS* = 0
-    ERROR_CONNECTION_REFUSED* = 1225
-    PIPE_TYPE_BYTE* = 0
-    PIPE_READMODE_BYTE* = 0
-    PIPE_TYPE_MESSAGE* = 0x4
-    PIPE_READMODE_MESSAGE* = 0x2
-    PIPE_WAIT* = 0
-    PIPE_UNLIMITED_INSTANCES* = 255
-    ERROR_BROKEN_PIPE* = 109
-    ERROR_PIPE_NOT_CONNECTED* = 233
-    ERROR_NO_DATA* = 232
-    ERROR_CONNECTION_ABORTED* = 1236
-
-  proc cancelIo*(hFile: HANDLE): WINBOOL
-       {.stdcall, dynlib: "kernel32", importc: "CancelIo".}
-  proc connectNamedPipe*(hPipe: HANDLE, lpOverlapped: ptr OVERLAPPED): WINBOOL
-       {.stdcall, dynlib: "kernel32", importc: "ConnectNamedPipe".}
-  proc disconnectNamedPipe*(hPipe: HANDLE): WINBOOL
-       {.stdcall, dynlib: "kernel32", importc: "DisconnectNamedPipe".}
-  proc setNamedPipeHandleState*(hPipe: HANDLE, lpMode, lpMaxCollectionCount,
-                                lpCollectDataTimeout: ptr DWORD): WINBOOL
-       {.stdcall, dynlib: "kernel32", importc: "SetNamedPipeHandleState".}
-  proc resetEvent*(hEvent: HANDLE): WINBOOL
-       {.stdcall, dynlib: "kernel32", importc: "ResetEvent".}

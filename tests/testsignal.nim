@@ -29,13 +29,14 @@ suite "Signal handling test suite":
       discard posix.kill(posix.getpid(), cint(signal))
       waitFor(fut)
       signalCounter == value
-  else:
-    const
-      SIGINT = 0
-      SIGTERM = 0
-    proc test(signal, value: int): bool = true
 
   test "SIGINT test":
-    check test(SIGINT, 31337) == true
+    when defined(windows):
+      skip()
+    else:
+      check test(SIGINT, 31337) == true
   test "SIGTERM test":
-    check test(SIGTERM, 65537) == true
+    when defined(windows):
+      skip()
+    else:
+      check test(SIGTERM, 65537) == true

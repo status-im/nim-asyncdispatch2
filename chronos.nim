@@ -6,5 +6,6 @@
 #  Apache License, version 2.0, (LICENSE-APACHEv2)
 #              MIT license (LICENSE-MIT)
 import chronos/[asyncloop, asyncfutures2, asyncsync, handles, transport,
-                timer]
-export asyncloop, asyncfutures2, asyncsync, handles, transport, timer
+                timer, achannels]
+export asyncloop, asyncfutures2, asyncsync, handles, transport, timer,
+       achannels
