@@ -722,7 +722,8 @@ when defined(windows):
         GC_unref(ovl)
 
       proc cancel(udata: pointer) {.gcsafe.} =
-        sock.closeSocket()
+        if not(retFuture.finished()):
+          sock.closeSocket()
 
       povl = RefCustomOverlapped()
       GC_ref(povl)
@@ -1250,7 +1251,8 @@ else:
         retFuture.complete(transp)
 
     proc cancel(udata: pointer) {.gcsafe.} =
-      closeSocket(sock)
+      if not(retFuture.finished()):
+        closeSocket(sock)
 
     while true:
       var res = posix.connect(SocketHandle(sock),
