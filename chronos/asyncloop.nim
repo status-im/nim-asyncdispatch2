@@ -627,17 +627,12 @@ elif unixPlatform:
     ## soon as all pending operations will be notified.
     ## You can execute ``aftercb`` before actual socket close operation.
     let loop = getGlobalDispatcher()
-    let currentStackTrace = getStackTrace()
-    proc continuation(udata: pointer) =
-      try:
-        unregister(fd)
-      except AssertionError as exc:
-        echo "closeSocket stack trace: "
-        echo "---"
-        echo currentStackTrace
-        echo "---"
-        raise exc
+    echo "=== Closing socket fd = ", int(fd)
+    echo getStackTrace()
+    echo "==="
 
+    proc continuation(udata: pointer) =
+      unregister(fd)
       close(SocketHandle(fd))
       if not isNil(aftercb):
         aftercb(nil)
