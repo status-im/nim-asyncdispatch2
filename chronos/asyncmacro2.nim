@@ -50,7 +50,7 @@ template createCb(retFutureSym, iteratorNameSym,
             next.addCallback(identName)
     except CancelledError:
       retFutureSym.cancel()
-    except CatchableError as exc:
+    except Exception as exc:
       futureVarCompletions
 
       if retFutureSym.finished():
