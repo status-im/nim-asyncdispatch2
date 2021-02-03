@@ -310,7 +310,7 @@ when defined(windows) or defined(nimdoc):
 
     PDispatcher* = ref object of PDispatcherBase
       ioPort: Handle
-      handles: HashSet[AsyncFD]
+      handles*: HashSet[AsyncFD]
       connectEx*: WSAPROC_CONNECTEX
       acceptEx*: WSAPROC_ACCEPTEX
       getAcceptExSockAddrs*: WSAPROC_GETACCEPTEXSOCKADDRS
@@ -513,7 +513,7 @@ elif unixPlatform:
       wdata*: CompletionData
 
     PDispatcher* = ref object of PDispatcherBase
-      selector: Selector[SelectorData]
+      selector*: Selector[SelectorData]
       keys: seq[ReadyKey]
 
   proc `==`*(x, y: AsyncFD): bool {.borrow.}
