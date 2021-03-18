@@ -385,7 +385,7 @@ when defined(windows) or defined(nimdoc):
     initAPI(res)
     res
 
-  var gDisp{.threadvar.}: PDispatcher ## Global dispatcher
+  var gDisp{.threadvar.}: PDispatcher ## Thread's dispatcher
 
   proc setThreadDispatcher*(disp: PDispatcher) {.gcsafe, raises: [Defect].}
   proc getThreadDispatcher*(): PDispatcher {.gcsafe, raises: [Defect].}
@@ -533,7 +533,7 @@ elif unixPlatform:
     initAPI(res)
     res
 
-  var gDisp{.threadvar.}: PDispatcher ## Global dispatcher
+  var gDisp{.threadvar.}: PDispatcher ## Thread's dispatcher
 
   proc setThreadDispatcher*(disp: PDispatcher) {.gcsafe, raises: [Defect].}
   proc getThreadDispatcher*(): PDispatcher {.gcsafe, raises: [Defect].}
@@ -1072,7 +1072,7 @@ proc wait*[T](fut: Future[T], timeout = -1): Future[T] {.
 include asyncmacro2
 
 proc runForever*() =
-  ## Begins a never ending global dispatcher poll loop.
+  ## Begins a never ending thread's dispatcher poll loop.
   while true:
     poll()
 

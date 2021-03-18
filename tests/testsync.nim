@@ -37,7 +37,7 @@ suite "Asynchronous sync primitives test suite":
     discard testLock(9, lock)
     lock.release()
     ## There must be exactly 20 poll() calls
-    for i in 0..<20:
+    for i in 0 ..< 20:
       poll()
     result = testLockResult
 
@@ -234,16 +234,6 @@ suite "Asynchronous sync primitives test suite":
     poll()
     result = testQueue3Result
 
-  proc test6(): bool =
-    var queue = newAsyncQueue[int]()
-    queue.putNoWait(1)
-    queue.putNoWait(2)
-    queue.putNoWait(3)
-    queue.putNoWait(4)
-    queue.putNoWait(5)
-    queue.clear()
-    result = (len(queue) == 0)
-
   proc test7(): bool =
     var queue = newAsyncQueue[int]()
     var arr1 = @[1, 2, 3, 4, 5]
@@ -313,6 +303,138 @@ suite "Asynchronous sync primitives test suite":
     q.putNoWait(5)
     result = (5 in q and not(6 in q))
 
+  proc testPriorityBehavior(): int =
+    proc task1(aq: AsyncPriorityQueue[int]): Future[int] {.async.} =
+      var item1 = await aq.pop()
+      var item2 = await aq.pop()
+      return item1 + item2
+
+    proc task2(aq: AsyncPriorityQueue[int]) {.async.} =
+      await aq.push(1000)
+      await aq.push(2000)
+
+    var queue = newAsyncPriorityQueue[int](1)
+    var fut = task1(queue)
+    discard task2(queue)
+    ## There must be exactly 2 poll() calls
+    poll()
+    poll()
+    result = if fut.finished(): fut.read() else: 0
+
+  proc testPriorityQueue(): bool =
+    proc task1(aq: AsyncPriorityQueue[int]): Future[string] {.async.} =
+      var res = ""
+      for i in 0 ..< 10:
+        var item = await aq.pop()
+        res = res & $item
+      return res
+
+    proc task2(aq: AsyncPriorityQueue[int]) {.async.} =
+      await aq.push(6)
+      await aq.push(5)
+      await aq.push(9)
+      await aq.push(3)
+      await aq.push(4)
+      await aq.push(8)
+      await aq.push(2)
+      await aq.push(1)
+      await aq.push(0)
+      await aq.push(7)
+
+    var queue1 = newAsyncPriorityQueue[int](10)
+    var queue2 = newAsyncPriorityQueue[int](1)
+
+    discard task2(queue1)
+    let r1 = waitFor task1(queue1)
+    discard task2(queue2)
+    let r2 = waitFor task1(queue2)
+
+    return r1 == "0123456789" and r2 == "6593482107"
+
+  proc testAsyncSemaphoreBehavior(): bool =
+    var res = ""
+
+    proc testSemaphore(n: int, sem: AsyncSemaphore) {.async.} =
+      await sem.acquire()
+      res = res & $n
+      sem.release()
+
+    proc test(): Future[string] {.async.} =
+      var sem = newAsyncSemaphore()
+      await sem.acquire()
+      discard testSemaphore(0, sem)
+      discard testSemaphore(1, sem)
+      discard testSemaphore(2, sem)
+      discard testSemaphore(3, sem)
+      discard testSemaphore(4, sem)
+      discard testSemaphore(5, sem)
+      discard testSemaphore(6, sem)
+      discard testSemaphore(7, sem)
+      discard testSemaphore(8, sem)
+      discard testSemaphore(9, sem)
+      sem.release()
+      for i in 0 ..< 20:
+        poll()
+      return res
+
+    return waitFor(test()) == "0123456789"
+
+  proc testAsyncSemaphoreDoubleRelease(): bool =
+    var res = ""
+
+    proc testSemaphore(n: int, sem: AsyncSemaphore) {.async.} =
+      await sem.acquire()
+      res = res & $n
+      sem.release()
+
+    proc test(): Future[bool] {.async.} =
+      var sem = newAsyncSemaphore()
+      await sem.acquire()
+      var fut1 = testSemaphore(0, sem)
+      sem.release()
+      await sem.acquire()
+      await sleepAsync(50.milliseconds)
+      if fut1.finished() == true:
+        return false
+      sem.release()
+      await sleepAsync(50.milliseconds)
+      if fut1.finished() == false:
+        return false
+      return res == "0"
+
+    return waitFor(test())
+
+  proc testAsyncSemaphoreCounter(): bool =
+    var res = ""
+
+    proc testSemaphore(n: int, sem: AsyncSemaphore) {.async.} =
+      await sem.acquire()
+      res = res & $n
+
+    proc test(): Future[bool] {.async.} =
+      var sem = newAsyncSemaphore(3)
+      discard testSemaphore(0, sem)
+      discard testSemaphore(1, sem)
+      discard testSemaphore(2, sem)
+      discard testSemaphore(3, sem)
+      discard testSemaphore(4, sem)
+      discard testSemaphore(5, sem)
+      await sleepAsync(50.milliseconds)
+      if res != "012":
+        return false
+      sem.release()
+      await sleepAsync(50.milliseconds)
+      if res != "0123":
+        return false
+      sem.release()
+      sem.release()
+      await sleepAsync(50.milliseconds)
+      if res != "012345":
+        return false
+      return true
+
+    return waitFor(test())
+
   test "AsyncLock() behavior test":
     check:
       test1() == "0123456789"
@@ -344,11 +466,19 @@ suite "Asynchronous sync primitives test suite":
     check test4() == 0
   test "AsyncQueue() addLast/addFirst/popLast/popFirst test":
     check test5() == 1100
-  test "AsyncQueue() clear test":
-    check test6() == true
   test "AsyncQueue() iterators/assignments test":
     check test7() == true
   test "AsyncQueue() representation test":
     check test8() == true
   test "AsyncQueue() contains test":
     check test9() == true
+  test "AsyncPriorityQueue() behavior test":
+    check testPriorityBehavior() == 3000
+  test "AsyncPriorityQueue() priority test":
+    check testPriorityQueue() == true
+  test "AsyncSemaphore() behavior test":
+    check testAsyncSemaphoreBehavior() == true
+  test "AsyncSemaphore() double release test":
+    check testAsyncSemaphoreDoubleRelease() == true
+  test "AsyncSemaphore() counter test":
+    check testAsyncSemaphoreCounter() == true
