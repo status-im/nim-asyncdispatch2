@@ -354,7 +354,7 @@ when not defined(android):
     inc(s.count)
     result = fdi
 
-proc registerEvent*[T](s: Selector[T], ev: SelectEvent, data: T) =
+proc registerEvent*[T](s: Selector[T], ev: SelectEvent, data: T) {.raises: [Defect, IOSelectorsException].} =
   let fdi = int(ev.efd)
   doAssert(s.fds[fdi].ident == InvalidIdent, "Event is already registered in the queue!")
   s.setKey(fdi, {Event.User}, 0, data)
