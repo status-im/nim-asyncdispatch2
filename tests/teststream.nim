@@ -16,6 +16,9 @@ when defined(windows):
 else:
   import posix
 
+let isNimPackageTest = existsEnv("NIM_TEST_PACKAGES")
+let TestsCount = if isNimPackageTest: 1 else: 100
+
 suite "Stream Transport test suite":
   const
     ConstantMessage = "SOMEDATA"
@@ -26,8 +29,7 @@ suite "Stream Transport test suite":
     MessagesCount = 10
     MessageSize = 20
     FilesCount = 10
-    TestsCount = 100
-
+  
     m1 = "readLine() multiple clients with messages (" & $ClientsCount &
          " clients x " & $MessagesCount & " messages)"
     m2 = "readExactly() multiple clients with messages (" & $ClientsCount &

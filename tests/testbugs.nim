@@ -7,14 +7,17 @@
 #              MIT license (LICENSE-MIT)
 import unittest2
 import ../chronos
+import os
 
 when defined(nimHasUsed): {.used.}
+
+let isNimPackageTest = existsEnv("NIM_TEST_PACKAGES")
+let TestsCount = if isNimPackageTest: 1 else: 500
 
 suite "Asynchronous issues test suite":
   const HELLO_PORT = 45679
   const TEST_MSG = "testmsg"
   const MSG_LEN = TEST_MSG.len()
-  const TestsCount = 500
 
   type
     CustomData = ref object
