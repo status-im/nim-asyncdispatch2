@@ -243,6 +243,12 @@ template complete*[T](future: Future[T], val: T) =
   ## Completes ``future`` with value ``val``.
   complete(future, val, getSrcLocation())
 
+template complete*[T](F: type Future[T], val: T, fromProc: static[string] = ""): F =
+  ## Completes a new ``Future[T]`` with value ``val``.
+  let future = newFuture[T](fromProc)
+  complete(future, val, getSrcLocation())
+  future
+
 proc complete(future: Future[void], loc: ptr SrcLoc) =
   if not(future.cancelled()):
     checkFinished(FutureBase(future), loc)
@@ -252,6 +258,12 @@ proc complete(future: Future[void], loc: ptr SrcLoc) =
 template complete*(future: Future[void]) =
   ## Completes a void ``future``.
   complete(future, getSrcLocation())
+
+template complete*(F: type Future[void], fromProc: static[string] = "") =
+  ## Completes a new void ``future``.
+  let future = newFuture[void](fromProc)
+  complete(future, getSrcLocation())
+  future
 
 proc complete[T](future: FutureVar[T], loc: ptr SrcLoc) =
   if not(future.cancelled()):
@@ -292,6 +304,15 @@ proc fail[T](future: Future[T], error: ref CatchableError, loc: ptr SrcLoc) =
 template fail*[T](future: Future[T], error: ref CatchableError) =
   ## Completes ``future`` with ``error``.
   fail(future, error, getSrcLocation())
+
+template fail*[T](
+    F: type Future[T],
+    error: ref CatchableError,
+    fromProc: static[string] = ""): F =
+  ## Completes a new ``Future[T]`` with ``error``.
+  let future = newFuture[T](fromProc)
+  fail(future, error, getSrcLocation())
+  future
 
 template newCancelledError(): ref CancelledError =
   (ref CancelledError)(msg: "Future operation cancelled!")

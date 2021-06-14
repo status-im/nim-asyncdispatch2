@@ -1315,4 +1315,9 @@ suite "Future[T] behavior test suite":
       f2.finished()
       f3.finished()
 
+  test "completed futures":
+    check:
+      Future[int].complete(42).read() == 42
 
+    expect(ValueError):
+      discard Future[int].fail((ref ValueError)(msg: "help")).read()
