@@ -186,6 +186,14 @@ type
     ## A Duration is the interval between to points in time.
     value: int64
 
+  TimeUnit* = enum ## Different units of time.
+    Nanoseconds, Microseconds, Milliseconds, Seconds, Minutes, Hours, Days,
+    Weeks, Months, Years
+
+  FixedTimeUnit* = range[Nanoseconds..Weeks]
+
+  DurationParts* = array[FixedTimeUnit, int64]
+
 when sizeof(int) == 4:
   type SomeIntegerI64* = SomeSignedInt|uint|uint8|uint16|uint32
 else:
@@ -300,6 +308,7 @@ const
   Week* = Day * 7'i64
 
   ZeroDuration* = Duration(value: 0'i64)
+  DurationZero* = ZeroDuration
   InfiniteDuration* = Duration(value: high(int64))
 
 func nanoseconds*(v: SomeIntegerI64): Duration {.inline.} =
@@ -365,6 +374,103 @@ func days*(v: Duration): int64 {.inline.} =
 func weeks*(v: Duration): int64 {.inline.} =
   ## Round Duration ``v`` to weeks.
   result = v.value div Week.value
+
+const
+  secondsInMin = 60
+  secondsInHour = 60*60
+  secondsInDay = 60*60*24
+
+const unitWeights: array[FixedTimeUnit, int64] = [
+  1'i64,
+  1000,
+  1_000_000,
+  1e9.int64,
+  secondsInMin * 1e9.int64,
+  secondsInHour * 1e9.int64,
+  secondsInDay * 1e9.int64,
+  7 * secondsInDay * 1e9.int64,
+]
+
+func convert*[T: SomeInteger](unitFrom, unitTo: FixedTimeUnit, quantity: T): T
+    {.inline.} =
+  ## Convert a quantity of some duration unit to another duration unit.
+  ## This proc only deals with integers, so the result might be truncated.
+  runnableExamples:
+    doAssert convert(Days, Hours, 2) == 48
+    doAssert convert(Days, Weeks, 13) == 1 # Truncated
+    doAssert convert(Seconds, Milliseconds, -1) == -1000
+  if unitFrom < unitTo:
+    (quantity div (unitWeights[unitTo] div unitWeights[unitFrom])).T
+  else:
+    ((unitWeights[unitFrom] div unitWeights[unitTo]) * quantity).T
+
+func normalize[T: Duration](seconds, nanoseconds: int64): T =
+  ## Normalize a (seconds, nanoseconds) pair and return it as either
+  ## a ``Duration`` or ``Time``. A normalized ``Duration|Time`` has a
+  ## positive nanosecond part in the range ``NanosecondRange``.
+  var seconds = seconds + convert(Nanoseconds, Seconds, nanoseconds)
+  var nanosecond = nanoseconds mod convert(Seconds, Nanoseconds, 1)
+  if nanosecond < 0:
+    nanosecond += convert(Seconds, Nanoseconds, 1)
+    seconds -= 1
+  seconds.seconds + nanoseconds.nanoseconds
+
+func initDuration*(nanoseconds, microseconds, milliseconds,
+                   seconds, minutes, hours, days, weeks: int64 = 0): Duration =
+  ## Create a new `Duration <#Duration>`_.
+  runnableExamples:
+    let dur = initDuration(seconds = 1, milliseconds = 1)
+    doAssert dur.inMilliseconds == 1001
+    doAssert dur.inSeconds == 1
+
+  let seconds = convert(Weeks, Seconds, weeks) +
+    convert(Days, Seconds, days) +
+    convert(Minutes, Seconds, minutes) +
+    convert(Hours, Seconds, hours) +
+    convert(Seconds, Seconds, seconds) +
+    convert(Milliseconds, Seconds, milliseconds) +
+    convert(Microseconds, Seconds, microseconds) +
+    convert(Nanoseconds, Seconds, nanoseconds)
+  let nanoseconds = (convert(Milliseconds, Nanoseconds, milliseconds mod 1000) +
+    convert(Microseconds, Nanoseconds, microseconds mod 1_000_000) +
+    nanoseconds mod 1_000_000_000).int
+  # Nanoseconds might be negative so we must normalize.
+  result = normalize[Duration](seconds, nanoseconds)
+
+func toParts*(dur: Duration): DurationParts =
+  ## Converts a duration into an array consisting of fixed time units.
+  ##
+  ## Each value in the array gives information about a specific unit of
+  ## time, for example ``result[Days]`` gives a count of days.
+  ##
+  ## This procedure is useful for converting ``Duration`` values to strings.
+  runnableExamples:
+    var dp = toParts(initDuration(weeks = 2, days = 1))
+    doAssert dp[Days] == 1
+    doAssert dp[Weeks] == 2
+    doAssert dp[Minutes] == 0
+    dp = toParts(initDuration(days = -1))
+    doAssert dp[Days] == -1
+
+  var remS = dur.seconds
+  var remNs = dur.nanoseconds.int
+
+  # Ensure the same sign for seconds and nanoseconds
+  if remS < 0 and remNs != 0:
+    remNs -= convert(Seconds, Nanoseconds, 1)
+    remS.inc 1
+
+  for unit in countdown(Weeks, Seconds):
+    let quantity = convert(Seconds, unit, remS)
+    remS = remS mod convert(unit, Seconds, 1)
+
+    result[unit] = quantity
+
+  for unit in countdown(Milliseconds, Nanoseconds):
+    let quantity = convert(Nanoseconds, unit, remNs)
+    remNs = remNs mod convert(unit, Nanoseconds, 1)
+
+    result[unit] = quantity
 
 func nanos*(v: SomeIntegerI64): Duration {.inline.} =
   result = nanoseconds(v)
