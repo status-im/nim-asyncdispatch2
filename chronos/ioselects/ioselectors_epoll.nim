@@ -496,6 +496,12 @@ proc contains*[T](s: Selector[T], fd: SocketHandle|int): bool {.inline.} =
   let fdi = int(fd)
   fdi < s.numFD and s.fds[fdi].ident != InvalidIdent
 
+proc getData*[T](s: Selector[T], fd: SocketHandle|int): var T =
+  let fdi = int(fd)
+  s.checkFd(fdi)
+  if fdi in s:
+    result = s.fds[fdi].data
+
 proc setData*[T](s: Selector[T], fd: SocketHandle|int, data: T): bool =
   let fdi = int(fd)
   s.checkFd(fdi)
