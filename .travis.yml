@@ -22,6 +22,7 @@ install:
   - export PATH="$PWD/Nim/bin:$PATH"
 
 script:
-  - nimble install -y
-  - nimble test
+  - nimble install -d -y
+  - nimble install slim -y
+  - slim test
 

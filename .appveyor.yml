@@ -32,9 +32,10 @@ build_script:
   - cd C:\projects\%APPVEYOR_PROJECT_SLUG%
   - nimble install -y --depsOnly
   - nimble install -y libbacktrace
+  - nimble install slim -y
 
 test_script:
-  - nimble test
+  - slim test
 
 deploy: off
 

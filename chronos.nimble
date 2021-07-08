@@ -10,8 +10,10 @@ skipDirs      = @["tests"]
 requires "nim > 1.2.0",
          "stew",
          "bearssl",
-         "httputils",
-         "https://github.com/status-im/nim-unittest2.git#head"
+         "httputils"
+
+before test:
+  requires "https://github.com/status-im/nim-unittest2.git#head"
 
 task test, "Run all tests":
   var
