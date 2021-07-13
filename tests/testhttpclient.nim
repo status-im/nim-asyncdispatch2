@@ -688,13 +688,24 @@ suite "HTTP client testing suite":
       await server.closeWait()
       return "redirect-" & $res
 
-  proc testBasicAuthorization(): Future[bool] {.async.} =
+  proc testJigsawBasicAuthorization(): Future[bool] {.async.} =
     var session = createSession(true, maxRedirections = 10)
     let url = parseUri("https://guest:guest@jigsaw.w3.org/HTTP/Basic/")
     let resp = await session.fetch(url)
     await session.closeWait()
     if (resp.status == 200) and
        ("Your browser made it!" in cast[string](resp.data)):
+      return true
+    else:
+      return false
+
+  proc testJigsawRedirect301(): Future[bool] {.async.} =
+    var session = createSession(true, maxRedirections = 10)
+    let url = parseUri("https://jigsaw.w3.org/HTTP/300/301.html")
+    let resp = await session.fetch(url)
+    await session.closeWait()
+    if (resp.status == 200) and
+       ("A set of HTTP/1.1 redirect codes" in cast[string](resp.data)):
       return true
     else:
       return false
@@ -763,13 +774,23 @@ suite "HTTP client testing suite":
     let address = initTAddress("127.0.0.1:30080")
     check waitFor(testRequestRedirectTest(address, true, 4)) == "redirect-true"
 
-  test "HTTPS basic authorization test":
-    check waitFor(testBasicAuthorization()) == true
+  test "HTTPS jigsaw basic authorization test":
+    check waitFor(testJigsawBasicAuthorization()) == true
+
+  test "HTTPS jigsaw 301 redirection test":
+    check waitFor(testJigsawRedirect301()) == true
 
   test "Leaks test":
-    proc getTrackerLeaks(tracker: string): bool =
-      let tracker = getTracker(tracker)
-      if isNil(tracker): false else: tracker.isLeaked()
+    proc getTrackerLeaks(trackerName: string): bool =
+      let tracker = getTracker(trackerName)
+      if isNil(tracker):
+        false
+      else:
+        if tracker.isLeaked():
+          echo tracker.dump()
+          true
+        else:
+          false
 
     check:
       getTrackerLeaks("http.body.reader") == false

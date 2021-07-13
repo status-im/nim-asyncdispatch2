@@ -542,13 +542,14 @@ proc closeWait(conn: HttpClientConnectionRef) {.async.} =
         if not(isNil(conn.writer)) and not(conn.writer.closed()):
           res.add(conn.writer.closeWait())
         res
-    if len(pending) > 0: await allFutures(pending)
+    if len(pending) > 0:
+      awaitrc allFutures(pending)
     case conn.kind
     of HttpClientScheme.Secure:
-      await allFutures(conn.treader.closeWait(), conn.twriter.closeWait())
+      awaitrc allFutures(conn.treader.closeWait(), conn.twriter.closeWait())
     of HttpClientScheme.NonSecure:
       discard
-    await conn.transp.closeWait()
+    awaitrc conn.transp.closeWait()
     conn.state = HttpClientConnectionState.Closed
     untrackHttpClientConnection(conn)
 
@@ -577,10 +578,10 @@ proc connect(session: HttpSessionRef,
               await res.tls.handshake()
               res.state = HttpClientConnectionState.Ready
             except CancelledError as exc:
-              await res.closeWait()
+              awaitrc res.closeWait()
               raise exc
             except AsyncStreamError:
-              await res.closeWait()
+              awaitrc res.closeWait()
               res.state = HttpClientConnectionState.Error
           of HttpClientScheme.Nonsecure:
             res.state = HttpClientConnectionState.Ready
@@ -651,11 +652,11 @@ proc closeWait*(request: HttpClientRequestRef) {.async.} =
     request.setState(HttpClientRequestState.Closing)
     if not(isNil(request.writer)):
       if not(request.writer.closed()):
-        await request.writer.closeWait()
-      request.writer = nil
+        awaitrc request.writer.closeWait()
+        request.writer = nil
     if request.state != HttpClientRequestState.ResponseReceived:
       if not(isNil(request.connection)):
-        await request.session.releaseConnection(request.connection)
+        awaitrc request.session.releaseConnection(request.connection)
         request.connection = nil
     request.session = nil
     request.error = nil
@@ -668,10 +669,10 @@ proc closeWait*(response: HttpClientResponseRef) {.async.} =
     response.setState(HttpClientResponseState.Closing)
     if not(isNil(response.reader)):
       if not(response.reader.closed()):
-        await response.reader.closeWait()
-      response.reader = nil
+        awaitrc response.reader.closeWait()
+        response.reader = nil
     if not(isNil(response.connection)):
-      await response.session.releaseConnection(response.connection)
+      awaitrc response.session.releaseConnection(response.connection)
       response.connection = nil
     response.session = nil
     response.error = nil
@@ -1065,9 +1066,11 @@ proc getBodyReader*(resp: HttpClientResponseRef): HttpBodyReader =
 
 proc finish*(resp: HttpClientResponseRef) {.async.} =
   ## Finish receiving response.
-  doAssert(resp.state == HttpClientResponseState.BodyReceiving)
+  doAssert(resp.state == HttpClientResponseState.BodyReceiving,
+           $resp.state)
   doAssert(resp.connection.state ==
-           HttpClientConnectionState.ResponseBodyReceiving)
+           HttpClientConnectionState.ResponseBodyReceiving,
+           $resp.connection.state)
   doAssert(resp.reader.closed())
   resp.setState(HttpClientResponseState.BodyReceived)
   resp.connection.state = HttpClientConnectionState.Ready
@@ -1075,9 +1078,11 @@ proc finish*(resp: HttpClientResponseRef) {.async.} =
 proc getBodyBytes*(response: HttpClientResponseRef): Future[seq[byte]] {.
      async.} =
   ## Read all bytes from response ``response``.
-  doAssert(response.state == HttpClientResponseState.HeadersReceived)
+  doAssert(response.state == HttpClientResponseState.HeadersReceived,
+           $response.state)
   doAssert(response.connection.state ==
-           HttpClientConnectionState.ResponseHeadersReceived)
+           HttpClientConnectionState.ResponseHeadersReceived,
+           $response.connection.state)
   var reader = response.getBodyReader()
   try:
     let data = await reader.read()
@@ -1087,12 +1092,12 @@ proc getBodyBytes*(response: HttpClientResponseRef): Future[seq[byte]] {.
     return data
   except CancelledError as exc:
     if not(isNil(reader)):
-      await reader.closeWait()
+      awaitrc reader.closeWait()
     response.setError(newHttpInterruptError())
     raise exc
   except AsyncStreamError as exc:
     if not(isNil(reader)):
-      await reader.closeWait()
+      awaitrc reader.closeWait()
     let error = newHttpReadError("Could not read response")
     response.setError(error)
     raise error
@@ -1113,12 +1118,12 @@ proc getBodyBytes*(response: HttpClientResponseRef,
     return data
   except CancelledError as exc:
     if not(isNil(reader)):
-      await reader.closeWait()
+      awaitrc reader.closeWait()
     response.setError(newHttpInterruptError())
     raise exc
   except AsyncStreamError as exc:
     if not(isNil(reader)):
-      await reader.closeWait()
+      awaitrc reader.closeWait()
     let error = newHttpReadError("Could not read response")
     response.setError(error)
     raise error
@@ -1137,12 +1142,12 @@ proc consumeBody*(response: HttpClientResponseRef): Future[int] {.async.} =
     return res
   except CancelledError as exc:
     if not(isNil(reader)):
-      await reader.closeWait()
+      awaitrc reader.closeWait()
     response.setError(newHttpInterruptError())
     raise exc
   except AsyncStreamError as exc:
     if not(isNil(reader)):
-      await reader.closeWait()
+      awaitrc reader.closeWait()
     let error = newHttpReadError("Could not read response")
     response.setError(error)
     raise error
@@ -1183,11 +1188,22 @@ proc redirect*(request: HttpClientRequestRef,
 
 proc fetch*(request: HttpClientRequestRef): Future[HttpResponseTuple] {.
      async.} =
-  let response = await request.send()
-  let data = await response.getBodyBytes()
-  let code = response.status
-  await response.closeWait()
-  return (code, data)
+  var response: HttpClientResponseRef
+  try:
+    response = await request.send()
+    let buffer = await response.getBodyBytes()
+    let status = response.status
+    await response.closeWait()
+    response = nil
+    return (status, buffer)
+  except HttpError as exc:
+    if not(isNil(response)):
+      awaitrc response.closeWait()
+    raise exc
+  except CancelledError as exc:
+    if not(isNil(response)):
+      awaitrc response.closeWait()
+    raise exc
 
 proc fetch*(session: HttpSessionRef, url: Uri): Future[HttpResponseTuple] {.
      async.} =
@@ -1241,17 +1257,17 @@ proc fetch*(session: HttpSessionRef, url: Uri): Future[HttpResponseTuple] {.
         return (code, data)
     except CancelledError as exc:
       if not(isNil(request)):
-        await closeWait(request)
+        awaitrc closeWait(request)
       if not(isNil(redirect)):
-        await closeWait(redirect)
+        awaitrc closeWait(redirect)
       if not(isNil(response)):
-        await closeWait(response)
+        awaitrc closeWait(response)
       raise exc
     except HttpError as exc:
       if not(isNil(request)):
-        await closeWait(request)
+        awaitrc closeWait(request)
       if not(isNil(redirect)):
-        await closeWait(redirect)
+        awaitrc closeWait(redirect)
       if not(isNil(response)):
-        await closeWait(response)
+        awaitrc closeWait(response)
       raise exc

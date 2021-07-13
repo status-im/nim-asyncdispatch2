@@ -110,7 +110,8 @@ proc boundedReadLoop(stream: AsyncStreamReader) {.async.} =
       if toRead == 0:
         # When ``rstream.boundSize`` is set and we already readed
         # ``rstream.boundSize`` bytes.
-        rstream.state = AsyncStreamState.Finished
+        if rstream.state == AsyncStreamState.Running:
+          rstream.state = AsyncStreamState.Finished
       else:
         let res = await readUntilBoundary(rstream.rsource, addr buffer[0],
                                           toRead, rstream.boundary)
@@ -123,7 +124,8 @@ proc boundedReadLoop(stream: AsyncStreamReader) {.async.} =
               # consumer and declaring stream EOF. Otherwise could not be
               # consumed.
               await upload(addr rstream.buffer, addr buffer[0], length)
-              rstream.state = AsyncStreamState.Finished
+              if rstream.state == AsyncStreamState.Running:
+                rstream.state = AsyncStreamState.Finished
             else:
               rstream.offset = rstream.offset + uint64(res)
               # There should be one step between transferring last bytes to the
@@ -134,10 +136,12 @@ proc boundedReadLoop(stream: AsyncStreamReader) {.async.} =
               if (res < toRead) and rstream.rsource.atEof():
                 case rstream.cmpop
                 of BoundCmp.Equal:
-                  rstream.state = AsyncStreamState.Error
-                  rstream.error = newBoundedStreamIncompleteError()
+                  if rstream.state == AsyncStreamState.Running:
+                    rstream.state = AsyncStreamState.Error
+                    rstream.error = newBoundedStreamIncompleteError()
                 of BoundCmp.LessOrEqual:
-                  rstream.state = AsyncStreamState.Finished
+                  if rstream.state == AsyncStreamState.Running:
+                    rstream.state = AsyncStreamState.Finished
           else:
             rstream.offset = rstream.offset + uint64(res)
             # There should be one step between transferring last bytes to the
@@ -148,24 +152,30 @@ proc boundedReadLoop(stream: AsyncStreamReader) {.async.} =
             if (res < toRead) and rstream.rsource.atEof():
               case rstream.cmpop
               of BoundCmp.Equal:
-                rstream.state = AsyncStreamState.Error
-                rstream.error = newBoundedStreamIncompleteError()
+                if rstream.state == AsyncStreamState.Running:
+                  rstream.state = AsyncStreamState.Error
+                  rstream.error = newBoundedStreamIncompleteError()
               of BoundCmp.LessOrEqual:
-                rstream.state = AsyncStreamState.Finished
+                if rstream.state == AsyncStreamState.Running:
+                  rstream.state = AsyncStreamState.Finished
         else:
           case rstream.cmpop
           of BoundCmp.Equal:
-            rstream.state = AsyncStreamState.Error
-            rstream.error = newBoundedStreamIncompleteError()
+            if rstream.state == AsyncStreamState.Running:
+              rstream.state = AsyncStreamState.Error
+              rstream.error = newBoundedStreamIncompleteError()
           of BoundCmp.LessOrEqual:
-            rstream.state = AsyncStreamState.Finished
+            if rstream.state == AsyncStreamState.Running:
+              rstream.state = AsyncStreamState.Finished
 
     except AsyncStreamError as exc:
-      rstream.state = AsyncStreamState.Error
-      rstream.error = exc
+      if rstream.state == AsyncStreamState.Running:
+        rstream.state = AsyncStreamState.Error
+        rstream.error = exc
     except CancelledError:
-      rstream.state = AsyncStreamState.Error
-      rstream.error = newAsyncStreamUseClosedError()
+      if rstream.state == AsyncStreamState.Running:
+        rstream.state = AsyncStreamState.Error
+        rstream.error = newAsyncStreamUseClosedError()
 
     case rstream.state
     of AsyncStreamState.Running:
@@ -178,7 +188,7 @@ proc boundedReadLoop(stream: AsyncStreamReader) {.async.} =
       # Send `EOF` state to the consumer and wait until it will be received.
       await rstream.buffer.transfer()
       break
-    of AsyncStreamState.Closed:
+    of AsyncStreamState.Closing, AsyncStreamState.Closed:
       break
 
 proc boundedWriteLoop(stream: AsyncStreamWriter) {.async.} =
@@ -203,26 +213,32 @@ proc boundedWriteLoop(stream: AsyncStreamWriter) {.async.} =
           wstream.offset = wstream.offset + uint64(item.size)
           item.future.complete()
         else:
-          wstream.state = AsyncStreamState.Error
-          error = newBoundedStreamOverflowError()
+          if wstream.state == AsyncStreamState.Running:
+            wstream.state = AsyncStreamState.Error
+            error = newBoundedStreamOverflowError()
       else:
         if wstream.offset == wstream.boundSize:
-          wstream.state = AsyncStreamState.Finished
-          item.future.complete()
+          if wstream.state == AsyncStreamState.Running:
+            wstream.state = AsyncStreamState.Finished
+            item.future.complete()
         else:
           case wstream.cmpop
           of BoundCmp.Equal:
-            wstream.state = AsyncStreamState.Error
-            error = newBoundedStreamIncompleteError()
+            if wstream.state == AsyncStreamState.Running:
+              wstream.state = AsyncStreamState.Error
+              error = newBoundedStreamIncompleteError()
           of BoundCmp.LessOrEqual:
-            wstream.state = AsyncStreamState.Finished
-            item.future.complete()
+            if wstream.state == AsyncStreamState.Running:
+              wstream.state = AsyncStreamState.Finished
+              item.future.complete()
     except CancelledError:
-      wstream.state = AsyncStreamState.Stopped
-      error = newAsyncStreamUseClosedError()
+      if wstream.state == AsyncStreamState.Running:
+        wstream.state = AsyncStreamState.Stopped
+        error = newAsyncStreamUseClosedError()
     except AsyncStreamError as exc:
-      wstream.state = AsyncStreamState.Error
-      error = exc
+      if wstream.state == AsyncStreamState.Running:
+        wstream.state = AsyncStreamState.Error
+        error = exc
 
     case wstream.state
     of AsyncStreamState.Running:
@@ -232,7 +248,8 @@ proc boundedWriteLoop(stream: AsyncStreamWriter) {.async.} =
         if not(item.future.finished()):
           item.future.fail(error)
       break
-    of AsyncStreamState.Finished, AsyncStreamState.Closed:
+    of AsyncStreamState.Finished, AsyncStreamState.Closing,
+       AsyncStreamState.Closed:
       error = newAsyncStreamUseClosedError()
       break
 

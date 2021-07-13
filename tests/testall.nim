@@ -6,6 +6,8 @@
 #  Apache License, version 2.0, (LICENSE-APACHEv2)
 #              MIT license (LICENSE-MIT)
 import testmacro, testsync, testsoon, testtime, testfut, testsignal,
-       testaddress, testdatagram, teststream, testserver, testbugs, testnet,
-       testasyncstream, testhttpserver, testshttpserver, testhttpclient
+       testaddress, testdatagram, teststream, testserver, testbugs, testnet
+import testasyncstream
+import testhttpserver, testshttpserver, testhttpclient
+import testcancel
 import testutils

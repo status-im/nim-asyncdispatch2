@@ -108,8 +108,9 @@ proc chunkedReadLoop(stream: AsyncStreamReader) {.async.} =
       let cres = getChunkSize(buffer.toOpenArray(0, res - len(CRLF) - 1))
 
       if cres.isErr():
-        rstream.error = newException(ChunkedStreamProtocolError, $cres.error)
-        rstream.state = AsyncStreamState.Error
+        if rstream.state == AsyncStreamState.Running:
+          rstream.error = newException(ChunkedStreamProtocolError, $cres.error)
+          rstream.state = AsyncStreamState.Error
       else:
         var chunksize = cres.get()
         if chunksize > 0'u64:
@@ -127,28 +128,34 @@ proc chunkedReadLoop(stream: AsyncStreamReader) {.async.} =
             await rstream.rsource.readExactly(addr buffer[0], 2)
 
             if buffer[0] != CRLF[0] or buffer[1] != CRLF[1]:
-              rstream.error = newException(ChunkedStreamProtocolError,
-                                           "Unexpected trailing bytes")
-              rstream.state = AsyncStreamState.Error
+              if rstream.state == AsyncStreamState.Running:
+                rstream.error = newException(ChunkedStreamProtocolError,
+                                             "Unexpected trailing bytes")
+                rstream.state = AsyncStreamState.Error
         else:
           # Reading trailing line for last chunk
           discard await rstream.rsource.readUntil(addr buffer[0],
                                                   len(buffer), CRLF)
-          rstream.state = AsyncStreamState.Finished
-          await rstream.buffer.transfer()
+          if rstream.state == AsyncStreamState.Running:
+            rstream.state = AsyncStreamState.Finished
+            await rstream.buffer.transfer()
     except CancelledError:
-      rstream.state = AsyncStreamState.Stopped
+      if rstream.state == AsyncStreamState.Running:
+        rstream.state = AsyncStreamState.Stopped
     except AsyncStreamLimitError:
-      rstream.state = AsyncStreamState.Error
-      rstream.error = newException(ChunkedStreamProtocolError,
-                                   "Chunk header exceeds maximum size")
+      if rstream.state == AsyncStreamState.Running:
+        rstream.state = AsyncStreamState.Error
+        rstream.error = newException(ChunkedStreamProtocolError,
+                                     "Chunk header exceeds maximum size")
     except AsyncStreamIncompleteError:
-      rstream.state = AsyncStreamState.Error
-      rstream.error = newException(ChunkedStreamIncompleteError,
-                                   "Incomplete chunk received")
+      if rstream.state == AsyncStreamState.Running:
+        rstream.state = AsyncStreamState.Error
+        rstream.error = newException(ChunkedStreamIncompleteError,
+                                     "Incomplete chunk received")
     except AsyncStreamReadError as exc:
-      rstream.state = AsyncStreamState.Error
-      rstream.error = exc
+      if rstream.state == AsyncStreamState.Running:
+        rstream.state = AsyncStreamState.Error
+        rstream.error = exc
 
     if rstream.state != AsyncStreamState.Running:
       # We need to notify consumer about error/close, but we do not care about
@@ -194,13 +201,16 @@ proc chunkedWriteLoop(stream: AsyncStreamWriter) {.async.} =
         # Everything is fine, completing queue item's future.
         item.future.complete()
         # Set stream state to Finished.
-        wstream.state = AsyncStreamState.Finished
+        if wstream.state == AsyncStreamState.Running:
+          wstream.state = AsyncStreamState.Finished
     except CancelledError:
-      wstream.state = AsyncStreamState.Stopped
-      error = newAsyncStreamUseClosedError()
+      if wstream.state == AsyncStreamState.Running:
+        wstream.state = AsyncStreamState.Stopped
+        error = newAsyncStreamUseClosedError()
     except AsyncStreamError as exc:
-      wstream.state = AsyncStreamState.Error
-      error = exc
+      if wstream.state == AsyncStreamState.Running:
+        wstream.state = AsyncStreamState.Error
+        error = exc
 
     if wstream.state != AsyncStreamState.Running:
       if wstream.state == AsyncStreamState.Finished:

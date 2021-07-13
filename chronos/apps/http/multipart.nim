@@ -283,7 +283,7 @@ proc closeWait*(mp: MultiPart) {.async.} =
   ## Close and release MultiPart's ``mp`` stream and resources.
   case mp.kind
   of MultiPartSource.Stream:
-    await closeWait(mp.stream)
+    awaitrc mp.stream.closeWait()
   else:
     discard
 
@@ -291,7 +291,7 @@ proc closeWait*(mpr: MultiPartReaderRef) {.async.} =
   ## Close and release MultiPartReader's ``mpr`` stream and resources.
   case mpr.kind
   of MultiPartSource.Stream:
-    await mpr.stream.closeWait()
+    awaitrc mpr.stream.closeWait()
   else:
     discard
 

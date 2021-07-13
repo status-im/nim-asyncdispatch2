@@ -7,7 +7,7 @@
 #    distribution, for details about the copyright.
 #
 
-import std/[macros]
+import std/macros
 
 proc skipUntilStmtList(node: NimNode): NimNode {.compileTime.} =
   # Skips a nest of StmtList's.
@@ -350,24 +350,13 @@ template await*[T](f: Future[T]): untyped =
   when declared(chronosInternalRetFuture):
     when not declaredInScope(chronosInternalTmpFuture):
       var chronosInternalTmpFuture {.inject.}: FutureBase
+    if chronosInternalRetFuture.mustCancel:
+      chronosInternalRetFuture.mustCancel = false
+      raise newCancelledError()
     chronosInternalTmpFuture = f
     chronosInternalRetFuture.child = chronosInternalTmpFuture
-
-    # This "yield" is meant for a closure iterator in the caller.
     yield chronosInternalTmpFuture
-
-    # By the time we get control back here, we're guaranteed that the Future we
-    # just yielded has been completed (success, failure or cancellation),
-    # through a very complicated mechanism in which the caller proc (a regular
-    # closure) adds itself as a callback to chronosInternalTmpFuture.
-    #
-    # Callbacks are called only after completion and a copy of the closure
-    # iterator that calls this template is still in that callback's closure
-    # environment. That's where control actually gets back to us.
-
     chronosInternalRetFuture.child = nil
-    if chronosInternalRetFuture.mustCancel:
-      raise newCancelledError()
     chronosInternalTmpFuture.internalCheckComplete()
     when T isnot void:
       cast[type(f)](chronosInternalTmpFuture).internalRead()
@@ -378,15 +367,47 @@ template awaitne*[T](f: Future[T]): Future[T] =
   when declared(chronosInternalRetFuture):
     when not declaredInScope(chronosInternalTmpFuture):
       var chronosInternalTmpFuture {.inject.}: FutureBase
+    if chronosInternalRetFuture.mustCancel:
+      chronosInternalRetFuture.mustCancel = false
+      raise newCancelledError()
     chronosInternalTmpFuture = f
     chronosInternalRetFuture.child = chronosInternalTmpFuture
     yield chronosInternalTmpFuture
     chronosInternalRetFuture.child = nil
-    if chronosInternalRetFuture.mustCancel:
-      raise newCancelledError()
     cast[type(f)](chronosInternalTmpFuture)
   else:
     unsupported "awaitne is only available within {.async.}"
+
+template awaitrc*[T](f: Future[T]): untyped =
+  const AttemptsCount = 2
+  when declared(chronosInternalRetFuture):
+    when not declaredInScope(chronosInternalTmpFuture):
+      var chronosInternalTmpFuture {.inject.}: FutureBase
+    var fut =
+      block:
+        var res: type(f)
+        for i in 0 ..< AttemptsCount:
+          chronosInternalTmpFuture = f
+          chronosInternalRetFuture.child = chronosInternalTmpFuture
+          yield chronosInternalTmpFuture
+          chronosInternalRetFuture.child = nil
+          res = cast[type(f)](chronosInternalTmpFuture)
+          case res.state
+          of FutureState.Pending:
+            raiseAssert("yield returns pending Future")
+          of FutureState.Finished:
+            break
+          of FutureState.Failed:
+            if not(res.error of CancelledError):
+              break
+          of FutureState.Cancelled:
+            continue
+        res
+    fut.internalCheckComplete()
+    when T isnot void:
+      cast[type(f)](fut).internalRead()
+  else:
+    unsupported "awaitrc is only available within {.async.}"
 
 macro async*(prc: untyped): untyped =
   ## Macro which processes async procedures into the appropriate

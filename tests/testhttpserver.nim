@@ -856,8 +856,19 @@ suite "HTTP server testing suite":
       check toString(table) == vector[2]
 
   test "Leaks test":
+    proc getTrackerLeaks(trackerName: string): bool =
+      let tracker = getTracker(trackerName)
+      if isNil(tracker):
+        false
+      else:
+        if tracker.isLeaked():
+          echo tracker.dump()
+          true
+        else:
+          false
+
     check:
-      getTracker("async.stream.reader").isLeaked() == false
-      getTracker("async.stream.writer").isLeaked() == false
-      getTracker("stream.server").isLeaked() == false
-      getTracker("stream.transport").isLeaked() == false
+      getTrackerLeaks("async.stream.reader") == false
+      getTrackerLeaks("async.stream.writer") == false
+      getTrackerLeaks("stream.server") == false
+      getTrackerLeaks("stream.transport") == false

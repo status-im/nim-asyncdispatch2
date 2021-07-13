@@ -780,210 +780,6 @@ suite "Future[T] behavior test suite":
              (f5.finished() and not(f5.failed())) and
              (f6.finished() and f6.failed())
 
-  test "cancel() async procedure test":
-    var completed = 0
-
-    proc client1() {.async.} =
-      await sleepAsync(1.seconds)
-      inc(completed)
-
-    proc client2() {.async.} =
-      await client1()
-      inc(completed)
-
-    proc client3() {.async.} =
-      await client2()
-      inc(completed)
-
-    proc client4() {.async.} =
-      await client3()
-      inc(completed)
-
-    var fut = client4()
-    fut.cancel()
-
-    # Future must not be cancelled immediately, because it has many nested
-    # futures.
-    check:
-      not fut.cancelled()
-
-    expect(CancelledError):
-      waitFor fut
-
-    check: completed == 0
-
-  test "cancelAndWait() test":
-    var completed = 0
-
-    proc client1() {.async.} =
-      await sleepAsync(1.seconds)
-      inc(completed)
-
-    proc client2() {.async.} =
-      await client1()
-      inc(completed)
-
-    proc client3() {.async.} =
-      await client2()
-      inc(completed)
-
-    proc client4() {.async.} =
-      await client3()
-      inc(completed)
-
-    var fut = client4()
-    waitFor cancelAndWait(fut)
-    check:
-      fut.cancelled()
-
-  test "Break cancellation propagation test":
-    var completed = 0
-
-    proc client1() {.async.} =
-      await sleepAsync(1.seconds)
-      inc(completed)
-
-    proc client2() {.async.} =
-      try:
-        await client1()
-      except CancelledError:
-        discard
-      inc(completed)
-
-    var fut1 = client2()
-    var fut2 = client2()
-    fut1.cancel()
-    waitFor fut1
-    waitFor cancelAndWait(fut2)
-
-    check:
-      not fut1.cancelled()
-      not fut2.cancelled()
-      completed == 2
-
-  test "Cancellation callback test":
-    var completed = 0
-    var cancelled = 0
-
-    proc client1(duration: Duration): Future[void] =
-      ## Suspends the execution of the current async procedure for the next
-      ## ``duration`` time.
-      var retFuture = newFuture[void]()
-      let moment = Moment.fromNow(duration)
-
-      proc completion(data: pointer) {.gcsafe.} =
-        inc(completed)
-        if not(retFuture.finished()):
-          retFuture.complete()
-
-      proc cancel(udata: pointer) {.gcsafe.} =
-        inc(cancelled)
-        if not(retFuture.finished()):
-          removeTimer(moment, completion, cast[pointer](retFuture))
-
-      retFuture.cancelCallback = cancel
-      discard setTimer(moment, completion, cast[pointer](retFuture))
-      return retFuture
-
-    var fut = client1(100.milliseconds)
-    fut.cancel()
-    waitFor(sleepAsync(500.milliseconds))
-
-    check:
-      fut.cancelled()
-      completed == 0
-      cancelled == 1
-
-  proc testWaitAsync(): Future[bool] {.async.} =
-    var neverFlag1, neverFlag2, neverFlag3: bool
-    var waitProc1, waitProc2: bool
-    proc neverEndingProc(): Future[void] =
-      var res = newFuture[void]()
-      proc continuation(udata: pointer) {.gcsafe.} =
-        neverFlag2 = true
-      proc cancellation(udata: pointer) {.gcsafe.} =
-        neverFlag3 = true
-      res.addCallback(continuation)
-      res.cancelCallback = cancellation
-      result = res
-      neverFlag1 = true
-
-    proc waitProc() {.async.} =
-      try:
-        await wait(neverEndingProc(), 100.milliseconds)
-      except CancelledError:
-        waitProc1 = true
-      finally:
-        waitProc2 = true
-
-    var fut = waitProc()
-    await cancelAndWait(fut)
-    result = (fut.state == FutureState.Finished) and
-             neverFlag1 and neverFlag2 and neverFlag3 and
-             waitProc1 and waitProc2
-
-  proc testWithTimeoutAsync(): Future[bool] {.async.} =
-    var neverFlag1, neverFlag2, neverFlag3: bool
-    var waitProc1, waitProc2: bool
-    proc neverEndingProc(): Future[void] =
-      var res = newFuture[void]()
-      proc continuation(udata: pointer) {.gcsafe.} =
-        neverFlag2 = true
-      proc cancellation(udata: pointer) {.gcsafe.} =
-        neverFlag3 = true
-      res.addCallback(continuation)
-      res.cancelCallback = cancellation
-      result = res
-      neverFlag1 = true
-
-    proc withTimeoutProc() {.async.} =
-      try:
-        discard await withTimeout(neverEndingProc(), 100.milliseconds)
-        doAssert(false)
-      except CancelledError:
-        waitProc1 = true
-      finally:
-        waitProc2 = true
-
-    var fut = withTimeoutProc()
-    await cancelAndWait(fut)
-    result = (fut.state == FutureState.Finished) and
-             neverFlag1 and neverFlag2 and neverFlag3 and
-             waitProc1 and waitProc2
-
-  proc testCancellationRaceAsync(): Future[bool] {.async.} =
-    var someFut = newFuture[void]()
-
-    proc raceProc(): Future[void] {.async.} =
-      await someFut
-
-    var raceFut1 = raceProc()
-    someFut.complete()
-    await cancelAndWait(raceFut1)
-
-    someFut = newFuture[void]()
-    var raceFut2 = raceProc()
-    someFut.fail(newException(ValueError, ""))
-    await cancelAndWait(raceFut2)
-
-    someFut = newFuture[void]()
-    var raceFut3 = raceProc()
-    someFut.cancel()
-    await cancelAndWait(raceFut3)
-
-    result = (raceFut1.state == FutureState.Cancelled) and
-             (raceFut2.state == FutureState.Cancelled) and
-             (raceFut3.state == FutureState.Cancelled)
-
-  test "Cancellation wait() test":
-    check: waitFor(testWaitAsync())
-
-  test "Cancellation withTimeout() test":
-    check: waitFor(testWithTimeoutAsync())
-
-  test "Cancellation race test":
-    check: waitFor(testCancellationRaceAsync())
-
   proc testAsyncSpawnAsync(): Future[bool] {.async.} =
 
     proc completeTask1() {.async.} =
@@ -1073,12 +869,12 @@ suite "Future[T] behavior test suite":
         (loc.procedure == procedure)
 
     check:
-      chk(loc10, "testfut.nim", 1041, "macroFuture")
-      chk(loc11, "testfut.nim", 1042, "")
-      chk(loc20, "testfut.nim", 1054, "template")
-      chk(loc21, "testfut.nim", 1057, "")
-      chk(loc30, "testfut.nim", 1051, "procedure")
-      chk(loc31, "testfut.nim", 1058, "")
+      chk(loc10, "testfut.nim", 837, "macroFuture")
+      chk(loc11, "testfut.nim", 838, "")
+      chk(loc20, "testfut.nim", 850, "template")
+      chk(loc21, "testfut.nim", 853, "")
+      chk(loc30, "testfut.nim", 847, "procedure")
+      chk(loc31, "testfut.nim", 854, "")
 
   test "withTimeout(fut) should wait cancellation test":
     proc futureNeverEnds(): Future[void] =
@@ -1314,5 +1110,3 @@ suite "Future[T] behavior test suite":
       f1.finished()
       f2.finished()
       f3.finished()
-
-

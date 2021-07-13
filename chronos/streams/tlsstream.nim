@@ -146,10 +146,12 @@ proc tlsWriteRec(engine: ptr SslEngineContext,
     sslEngineSendrecAck(engine, length)
     return TLSResult.Success
   except AsyncStreamError as exc:
-    writer.state = AsyncStreamState.Error
-    writer.error = exc
+    if writer.state == AsyncStreamState.Running:
+      writer.state = AsyncStreamState.Error
+      writer.error = exc
   except CancelledError:
-    writer.state = AsyncStreamState.Stopped
+    if writer.state == AsyncStreamState.Running:
+      writer.state = AsyncStreamState.Stopped
   return TLSResult.Error
 
 proc tlsWriteApp(engine: ptr SslEngineContext,
@@ -180,7 +182,8 @@ proc tlsWriteApp(engine: ptr SslEngineContext,
       item.future.complete()
       return TLSResult.Success
   except CancelledError:
-    writer.state = AsyncStreamState.Stopped
+    if writer.state == AsyncStreamState.Running:
+      writer.state = AsyncStreamState.Stopped
   return TLSResult.Error
 
 proc tlsReadRec(engine: ptr SslEngineContext,
@@ -197,10 +200,12 @@ proc tlsReadRec(engine: ptr SslEngineContext,
     else:
       return TLSResult.Success
   except CancelledError:
-    reader.state = AsyncStreamState.Stopped
+    if reader.state == AsyncStreamState.Running:
+      reader.state = AsyncStreamState.Stopped
   except AsyncStreamError as exc:
-    reader.state = AsyncStreamState.Error
-    reader.error = exc
+    if reader.state == AsyncStreamState.Running:
+      reader.state = AsyncStreamState.Error
+      reader.error = exc
   return TLSResult.Error
 
 proc tlsReadApp(engine: ptr SslEngineContext,
@@ -212,7 +217,8 @@ proc tlsReadApp(engine: ptr SslEngineContext,
     sslEngineRecvappAck(engine, length)
     return TLSResult.Success
   except CancelledError:
-    reader.state = AsyncStreamState.Stopped
+    if reader.state == AsyncStreamState.Running:
+      reader.state = AsyncStreamState.Stopped
   return TLSResult.Error
 
 template readAndReset(fut: untyped) =
@@ -224,11 +230,13 @@ template readAndReset(fut: untyped) =
       continue
     of TLSResult.Error:
       fut = nil
-      loopState = AsyncStreamState.Error
+      if loopState == AsyncStreamState.Running:
+        loopState = AsyncStreamState.Error
       break
     of TLSResult.EOF:
       fut = nil
-      loopState = AsyncStreamState.Finished
+      if loopState == AsyncStreamState.Running:
+        loopState = AsyncStreamState.Finished
       break
 
 proc cancelAndWait*(a, b, c, d: Future[TLSResult]): Future[void] =
@@ -285,7 +293,8 @@ proc tlsLoop*(stream: TLSAsyncStream) {.async.} =
     var state = sslEngineCurrentState(engine)
 
     if (state and SSL_CLOSED) == SSL_CLOSED:
-      loopState = AsyncStreamState.Finished
+      if loopState == AsyncStreamState.Running:
+        loopState = AsyncStreamState.Finished
       break
 
     if isNil(sendRecFut):
@@ -332,13 +341,20 @@ proc tlsLoop*(stream: TLSAsyncStream) {.async.} =
       try:
         discard await one(waiting)
       except CancelledError:
-        loopState = AsyncStreamState.Stopped
+        if loopState == AsyncStreamState.Running:
+          loopState = AsyncStreamState.Stopped
 
     if loopState != AsyncStreamState.Running:
       break
 
-  # Cancelling and waiting all the pending operations
-  await cancelAndWait(sendRecFut, sendAppFut, recvRecFut, recvAppFut)
+  # Cancelling and waiting all the pending operations, its possible that we
+  # receive `CancelledError` while awaiting, so we need to perform operation
+  # one more time.
+  try:
+    await cancelAndWait(sendRecFut, sendAppFut, recvRecFut, recvAppFut)
+  except CancelledError:
+    await cancelAndWait(sendRecFut, sendAppFut, recvRecFut, recvAppFut)
+
   # Calculating error
   let error =
     case loopState
